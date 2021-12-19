@@ -57,7 +57,6 @@ pub fn repeat<T: Copy>(v: &[T], desired_len: usize) -> Vec<T> {
 
 pub fn fast_convolve(mut larger: Vec<f32>, mut smaller: Vec<f32>) -> Vec<f32> {
     let shift_length = smaller.len() / 2;
-    let filt_sum: f32 = smaller.iter().sum();
     let size = larger.len() + smaller.len() - 1;
 
     // Zero pad vecs to size
@@ -70,9 +69,11 @@ pub fn fast_convolve(mut larger: Vec<f32>, mut smaller: Vec<f32>) -> Vec<f32> {
     multiply(&mut larger, &smaller);
 
     let mut result = ifft(larger);
+    let divide_by = (result.len() - shift_length) as f32;
     for i in 0..result.len() - shift_length {
-        result[i] = result[i + shift_length] / filt_sum;
+        result[i] = result[i + shift_length] / divide_by;
     }
+    result.truncate(result.len() - shift_length);
     result
 }
 

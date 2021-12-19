@@ -1,17 +1,19 @@
 import json
 import math
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal
+import matplotlib.cm as cmaps
 
 FREQ: int
-FREQRANGE: np.array
-matched_filter: np.array
+matched_filter: np.ndarray
 NORMAL_SAMPLES: int
 ANSWER: np.array
 SAMPLING_RATE = 44100
 DURATION = 2.5
+STREAMS: int
 
 
 def blumblumshub(count, seed, maxelem):
@@ -89,17 +91,68 @@ def do_gardner_search(angles, index):
             return index
 
 
-def demod(array):
+def doplot(*args, title=None, xlim=(50e3, 58e3), **kwargs):
+    if title:
+        plt.title(title)
+    if xlim:
+        plt.xlim(*xlim)
+    plt.plot(*args, **kwargs)
+    plt.figure()
+
+
+def demod_to_phase(array: np.ndarray, freq_range: np.ndarray):
+    frequency = (freq_range[0] + freq_range[1]) / 2
     secs = array.shape[0] / SAMPLING_RATE
-    oscrange = np.linspace(0, secs, array.shape[0]) * 2 * np.pi * FREQ
+    oscrange = np.linspace(0, secs, array.shape[0]) * 2 * np.pi * frequency
     oscillator = np.cos(oscrange) + 1j * np.sin(oscrange)
-    array = bpf(array, FREQRANGE * 2 / 44100)
+    array = bpf(array, freq_range * 2 / 44100)
+    doplot(array, title = "Band-pass filtered")
+    base_freq = lpf(np.multiply(array, oscillator), len(array), 100)
+    base_freq = np.convolve(base_freq, matched_filter, 'same')
+    base_freq = getangle(base_freq)
+    return base_freq
 
-    array = lpf(np.multiply(array, oscillator), len(array), 100)
-    array = np.convolve(array, matched_filter, 'same')
-    array = getangle(array)
+
+def to_bits(array: np.ndarray, working_index: int):
+    samples = []
+    should_pi4 = False
+
     plt.plot(array)
+    zero_point = array[working_index - 2 * NORMAL_SAMPLES]
+    plt.plot([working_index], [zero_point], color='black', marker='x', markersize=5)
+    for i in range(working_index, min(working_index + int(SAMPLING_RATE * DURATION), array.shape[0]),
+                   NORMAL_SAMPLES):
+        angle = array[i]
+        plt.plot([i], [angle], marker='o', markersize=2, color='red')
 
+        padding = np.pi / 4
+
+        angle -= zero_point
+        if should_pi4:
+            angle -= np.pi / 4
+        should_pi4 = not should_pi4
+        angle *= -1
+        while angle < -np.pi + padding:
+            angle += np.pi * 2
+        while angle > np.pi + padding:
+            angle -= np.pi * 2
+
+        if angle < -np.pi / 2 + padding:
+            bit_decision = 3
+        elif angle < 0 + padding:
+            bit_decision = 0
+        elif angle < np.pi / 2 + padding:
+            bit_decision = 1
+        elif angle < np.pi + padding:
+            bit_decision = 2
+        else:
+            bit_decision = -1
+
+        samples.append(bit_decision)
+    return samples
+
+
+def clock_recovery(array) -> Optional[Tuple[int, int]]:
     i = NORMAL_SAMPLES // 2
     best_headers = []
     while i < array.shape[0] - NORMAL_SAMPLES // 2:
@@ -129,69 +182,59 @@ def demod(array):
                 break
         error += 0.002 * math.sqrt(i)
         if count == 6:
-            best_headers.append((i + 11 * NORMAL_SAMPLES // 2, error))
-        elif count < 6 and len(best_headers) > 0:
-            if best_headers[-1][1] <= 10 and abs(best_headers[-1][0] - i) > 1000:
-                break
+            best_headers.append((i + int(4.5 * NORMAL_SAMPLES), error))
 
         i += 1
-
-    best_headers = sorted(best_headers, key=lambda k: k[1])
-    plt.plot(*zip(*best_headers[0:len(best_headers) // 5]), marker='1', markersize=5, linestyle='')
     if len(best_headers):
-        working_index, error = best_headers[0]
-        zero_point = array[working_index]
+        best_answer = min(best_headers, key=lambda k: k[1])
+        orig_i = best_answer[0] - int(4.5 * NORMAL_SAMPLES)
+        plt.plot([orig_i], [array[orig_i]], marker='1', markersize=10)
+        return best_answer
+    else:
+        return None
 
-        plt.plot([working_index], [zero_point], marker='x', markersize=4, color='black')
-        # Now i contains the working value
-        samples = []
-        should_pi4 = False
-        for i in range(working_index, min(working_index + int(SAMPLING_RATE * DURATION), array.shape[0]),
-                       NORMAL_SAMPLES):
-            angle = array[i]
-            plt.plot([i], [angle], marker='o', markersize=3, color='red')
 
-            padding = np.pi / 4
-            angle -= zero_point
-            if should_pi4:
-                angle -= np.pi / 4
-            should_pi4 = not should_pi4
-            angle *= -1
-            while angle < -np.pi + padding:
-                angle += np.pi * 2
-            while angle > np.pi + padding:
-                angle -= np.pi * 2
+def demod(array):
+    doplot(array, title="Raw, received signal")
+    base_freq_range = [FREQ * 4 - 80, FREQ * 4 + 80]
+    base_freq = demod_to_phase(array, np.array(base_freq_range))
 
-            if angle < -np.pi / 2 + padding:
-                bit_decision = 3
-            elif angle < 0 + padding:
-                bit_decision = 0
-            elif angle < np.pi / 2 + padding:
-                bit_decision = 1
-            elif angle < np.pi + padding:
-                bit_decision = 2
-            else:
-                bit_decision = -1
-
-            samples.append(bit_decision)
-        large_len = min(len(samples), len(ANSWER))
-        print("Sample: ", samples)
-        print("Error:", samples[:large_len] - ANSWER[:large_len])
+    plt.plot(base_freq)
+    best_header = clock_recovery(base_freq)
+    if best_header:
+        working_index, error = best_header
+        for i in range(2, 2 + STREAMS):
+            plt.clf()
+            freq_range = np.array([FREQ * i - 80, FREQ * i + 80])
+            upper_freq = demod_to_phase(array, freq_range)
+            plt.title(f"Stream #{i-2} {freq_range[0]} - {freq_range[1]} Hz")
+            samples1 = to_bits(upper_freq, working_index)
+            plt.savefig(f"{i}-ofdm.png")
+            print("Data:", " ".join(map(str, samples1)))
     return array
 
 
 def load():
-    global matched_filter, FREQ, FREQRANGE, NORMAL_SAMPLES, header_filter, ANSWER
+    global matched_filter, FREQ, NORMAL_SAMPLES, header_filter, ANSWER, STREAMS
+    print("(From Python) Demodulating received signal")
     f = json.load(open("/tmp/debug", "r"))
     li = np.asarray(f["li"])
+    fft(li)
+    plt.figure()
     matched_filter = np.asarray(f["filter"])
-    FREQ = f["frequency"] * 2
-    FREQRANGE = np.array([FREQ - 200, FREQ + 200])
+    plt.plot(f["transmit"])
+    plt.plot(li * 15)
+    plt.show()
+    return
+    BASEFREQ = f["frequency"]
+    FREQ = BASEFREQ
+    STREAMS = 1
     NORMAL_SAMPLES = int(44100 / f["baud"])
     header_filter = np.exp(-np.arange(-8, 8, 16 / NORMAL_SAMPLES) ** 2 * 0.3)
-
     ANSWER = np.array(
         list(blumblumshub(int(f["baud"] * DURATION), f["blumblumseed"], 4)))
+    fft(li)
+    plt.figure()
     l1 = demod(li)
     plt.show()
 
