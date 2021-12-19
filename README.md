@@ -2,8 +2,8 @@
 
 *Pictures near the end*
 
-This repository is a demonstration of sending bits over audio, then receiving them, demodulating the signals, and getting
-back the original message.
+This repository is a demonstration of sending bits over audio, then receiving them, demodulating the signals, and
+getting back the original message.
 
 The modulation scheme is quadrature phase shift keying (QPSK). I use a variant
 called [pi/4 QPSK](https://en.wikipedia.org/wiki/Phase-shift_keying#%CF%80/4-QPSK).
@@ -87,16 +87,17 @@ physical layer.
 
 <img src="https://github.com/econaxis/beeeeeep/blob/main/transmitted-received.png?raw=true" width="533px" height="400px">
 
-The FFT visualization of the received signal:
 
-<img srhttps://github.com/econaxis/beeeeeep/blob/mainc="/fft.png?raw=true" width=533px" height=400px>
+**The FFT visualization of the received signal**:
+
+<img src="https://github.com/econaxis/beeeeeep/blob/main/fft.png?raw=true" width="533px" height="400px">
 
 As you can see, each peak corresponds to a different data stream. This image was saved when I sent 11 data streams (
 instead of 10, like the previous example), hence why there are 11 peaks evenly spaced apart.
 
 **Filtering out a specific frequency (stream)**:
 
-<img src="https://github.com/econaxis/beeeeeep/blob/main/bpfed.png?raw=true" width="533px" height=400px">
+<img src="https://github.com/econaxis/beeeeeep/blob/main/bpfed.png?raw=true" width="533px" height="400px">
 
 We extract a specific range of frequencies corresponding to one data stream for demodulation.
 
